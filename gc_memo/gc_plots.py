@@ -5,6 +5,7 @@ be called directly, see also readme/simulation_examples for
 more information. All plots produced are saved to '/figures'.
 """
 from __future__ import division
+from __future__ import print_function
 
 from collections import Counter
 import itertools
@@ -667,7 +668,7 @@ def AM_effect_plot(topElist):
                               'darkgrey', 'tomato', 'darkblue', 'lightgreen'))
     fig, ax = plt.subplots()
     for item in topElist:
-        col = colorr.next()
+        col = next(colorr)
         ax.plot(np.array(item[1])/12., item[2], color=col,
                 label='$n_\mathrm{key} $ ='+' {}'.format(item[0]))
         ax.fill_between(np.array(item[1])/12., item[2]-item[3],

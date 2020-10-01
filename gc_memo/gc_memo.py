@@ -4,6 +4,7 @@ contains the main simulation loop. If the simulated data is stored
 as a file, this ends up in the folder '/raw_data'.
 """
 from __future__ import division
+from __future__ import print_function
 import itertools
 import math
 import random
