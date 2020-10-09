@@ -7,6 +7,10 @@ data stored in '/raw_data'.
 
 from __future__ import division
 from __future__ import print_function
+from builtins import next
+from builtins import zip
+from builtins import map
+from builtins import range
 from itertools import product
 
 import numpy as np
@@ -432,9 +436,9 @@ def heatmap_2p(df, paramvar1='dose', paramvar2='p_err', day=126,
              (df.p_block.isin(p_block))]
 
     # get a parameter value pair string for each non mapped parameter
-    paravals = zip([dose, np.array(LFdecay)/12, nGCs, nLFs, naive_pool, nkey, p_block,
+    paravals = list(zip([dose, np.array(LFdecay)/12, nGCs, nLFs, naive_pool, nkey, p_block,
                     p_err, tinf], [r'$dose=$ ', r'$LFdecay=$ ', r'$n_{GCs}=$ ', r'$n_{LFs}=$ ',
-                    r'$naive\ pool=$ ', r'$n_{key}=$ ', r'$p_{block}=$ ', r'$p_{err}=$ ', r'$n_{inf}=$ '])
+                    r'$naive\ pool=$ ', r'$n_{key}=$ ', r'$p_{block}=$ ', r'$p_{err}=$ ', r'$n_{inf}=$ ']))
     textblock = r'Parameters \\'
     for pv in paravals:
         textblock += pv[1] + (r'${}$\\'.format(pv[0]))
@@ -443,12 +447,12 @@ def heatmap_2p(df, paramvar1='dose', paramvar2='p_err', day=126,
     # get unique values of the two variable parameters and prepare plot labels
     param1 = sdf[paramvar1].unique().tolist()
     param1.sort()
-    labels1 = map(str, param1)
+    labels1 = list(map(str, param1))
     print(labels1)
 
     param2 = sdf[paramvar2].unique().tolist()
     param2.sort()
-    labels2 = map(str, param2)
+    labels2 = list(map(str, param2))
     print(labels2)
 
     # get empty arrays of size p1*p2 to collect means later

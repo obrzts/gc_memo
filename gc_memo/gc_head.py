@@ -6,6 +6,7 @@ as evaluations of specific parameter changes or vaccination scenarios.
 """
 
 from __future__ import division
+from builtins import range
 import math
 import numpy as np
 import pandas as pd
@@ -13,6 +14,7 @@ import scipy.stats
 import time
 import seaborn
 from collections import Counter
+from importlib import *
 
 import cf
 import gc_memo
@@ -58,6 +60,8 @@ def small_scale(store_export='dictionary'):
     for i in range(len(l_GCs)):
         GC_dynamics_plot(GCPans[i], ms_times[i], ms_fams[i], ms_vals[i],
                          ms_muts[i], runID, i)
+
+    return(simdata)
 
 
 def TUCHMI_sampling(store_export='datafile', d_export=True, subsample=12):
@@ -106,10 +110,11 @@ def TUCHMI_sampling(store_export='datafile', d_export=True, subsample=12):
         import_file(simdata)
 
     # for affinity-mutation scatter plot, downsample for visibility
-    samplefrac = 100./len(freePan[35*12].dropna())
+    pick_tp = 35*12
+    samplefrac = 100./len(freePan.sel(timepoint = pick_tp).dropna("dim_0"))
 
     # get list of lists to catch values at every timepoint
-    tList = freePan.keys()
+    tList = list(freePan["timepoint"].values)
     TT = len(tList)
     SHM_means = [[] for t in range(TT)]
     Entropies = [[] for t in range(TT)]
@@ -119,7 +124,7 @@ def TUCHMI_sampling(store_export='datafile', d_export=True, subsample=12):
     # get mean affinity at all time points
     Elist = []
     for tp in range(len(tList)):
-        C = freePan[tList[tp]]['affinity'].dropna().mean()
+        C = freePan.sel(timepoint = tList[tp]).loc[dict(dim_1="affinity")].dropna("dim_0").values.mean()
         Elist.append(C)
     # pass energies to plot function
     pool_affinity_plot(tList, Elist)
@@ -131,14 +136,16 @@ def TUCHMI_sampling(store_export='datafile', d_export=True, subsample=12):
             ttp = 12*tp
             # cellnumber to be sampled is either subsample or, if less cells
             # are available (more of a hypothetic case really), all cells
-            cellnum = min(subsample, len(freePan[ttp].dropna()))
+            freePan_no_na = freePan.sel(timepoint = ttp).dropna("dim_0")
+            cellnum = min(subsample, len(freePan_no_na))
             if cellnum > 0:
-                cells = freePan[ttp].dropna().sample(cellnum, replace=False)
-                c_muts = cells.mutations.tolist()
+                cell_id = np.random.choice(len(freePan_no_na), cellnum)
+                cells = freePan_no_na[cell_id, :]
+                c_muts = list(cells.loc[dict(dim_1="mutations")].values)
                 SHM_means[tp].append(np.nanmean(c_muts))
                 # evaluate entropies and clusterfractions
-                CC = Counter(cells.family.tolist())
-                Entropies[tp].append(scipy.stats.entropy(CC.values(), base=2)
+                CC = Counter(list(cells.loc[dict(dim_1="family")].values))
+                Entropies[tp].append(scipy.stats.entropy(list(CC.values()), base=2)
                                      / math.log(cellnum, 2))
                 # count again to find how many clones have one member only,
                 # calculate clusterfrac from this
@@ -174,16 +181,18 @@ def TUCHMI_sampling(store_export='datafile', d_export=True, subsample=12):
 
     for d in range(len(timecourse)):
         tp = timecourse[d]
-        cellnum = int(np.round(len(freePan[tp].dropna())*samplefrac))
+        freePan_no_na = freePan.sel(timepoint = tp).dropna("dim_0")
+        cellnum = int(np.round(len(freePan_no_na)*samplefrac))
         if cellnum > 0:
-            cells = freePan[tp].dropna().sample(cellnum, replace=False)
-            kdl = cells.affinity.tolist()
+            cell_id = np.random.choice(len(freePan_no_na), cellnum)
+            cells = freePan_no_na[cell_id, :]
+            kdl = list(cells.loc[dict(dim_1="affinity")].values)
             # transform norm E to KD
             kdll = np.exp(cf.y0+np.array(kdl)*cf.m)
             KD_list[d] = list(kdll)
             # get mutation counts, correct them and origin
-            SHM_list[d] = cells.mutations.tolist()
-            orglist[d] = cells.origin.tolist()
+            SHM_list[d] = list(cells.loc[dict(dim_1="mutations")].values)
+            orglist[d] = list(cells.loc[dict(dim_1="origin")].values)
 
     # pass information to plot function
     sample_scatter_plot(KD_list, SHM_list, orglist)
@@ -200,20 +209,22 @@ def TUCHMI_sampling(store_export='datafile', d_export=True, subsample=12):
 
     for d in range(len(timecourse)):
         tp = timecourse[d]
-        cellnum = int(len(freePan[tp].dropna())*samplefrac)
+        freePan_no_na = freePan.sel(timepoint = tp).dropna("dim_0")
+        cellnum = int(len(freePan_no_na)*samplefrac)
         if cellnum > 0:
-            cells = freePan[tp].dropna().sample(cellnum, replace=False)
-            kdl = cells.affinity.tolist()
+            cell_id = np.random.choice(len(freePan_no_na), cellnum)
+            cells = freePan_no_na[cell_id, :]
+            kdl = list(cells.loc[dict(dim_1="affinity")].values)
             # transform norm E to KD
             kdll = np.exp(cf.y0+np.array(kdl)*cf.m)
             KD_list += list(kdll)
-            SHM_list += list(cells.mutations.tolist())
-            fam_list += cells.family.tolist()
+            SHM_list += list(list(cells.loc[dict(dim_1="mutations")].values))
+            fam_list += list(cells.loc[dict(dim_1="family")].values)
             tp_list += [tp for k in range(cellnum)]
 
     # count into families and find clusters with more than xx members
     famcounter = Counter(fam_list)
-    fams = famcounter.keys()
+    fams = list(famcounter.keys())
     clusters = []
     for fam in fams:
         if famcounter[fam] > 1:
@@ -252,6 +263,8 @@ def TUCHMI_sampling(store_export='datafile', d_export=True, subsample=12):
         datafile.write('fraction of non-unique cells in sample, mean and std \n {} \n {} \n \n'.format(Mclusterfracs, Sclusterfracs))
 
         datafile.close()
+
+    return(simdata)
 
 
 def selection_vs_mutation(store_export='dictionary', d_export=True):
@@ -292,16 +305,18 @@ def selection_vs_mutation(store_export='dictionary', d_export=True):
         ms_times, ms_vals, ms_fams, ms_muts, mut_list, E_list = \
         import_file(simdata)
     # extract the affinities and ancestor affinities at the analysis points
-    tList = freePan.keys()
+    tList = list(freePan["timepoint"].values)
     for i in range(len(analysis_times)):
         # limit cell number to be drawn in order not to clatter the plot
         tp = analysis_times[i]
-        cellnum = min(2000, len(freePan[tList[tp]].dropna()))
-        cellnum = len(freePan[tList[tp]].dropna())
-        cells = freePan[tList[tp]].dropna().sample(cellnum, replace=False)
-        afflist = cells['affinity'].dropna().tolist()
+        freePan_no_na = freePan.sel(timepoint = tList[tp]).dropna("dim_0")
+        cellnum = min(2000, len(freePan_no_na))
+        cellnum = len(freePan_no_na)
+        cell_id = np.random.choice(len(freePan_no_na), cellnum)
+        cells = freePan_no_na[cell_id, :]
+        afflist = list(cells.loc[dict(dim_1="affinity")].values)
         final_dists.append(afflist)
-        aff0list = cells['affinity0'].dropna().tolist()
+        aff0list = list(cells.loc[dict(dim_1="affinity0")].values)
         ancestor_dists.append(aff0list)
     # send energy lists to histogram plot
     for i in range(len(analysis_times)):
@@ -326,6 +341,8 @@ def selection_vs_mutation(store_export='dictionary', d_export=True):
         datafile.write('{} \n \n'.format(final_dists))
 
         datafile.close()
+
+    return(simdata)
 
 
 def stacked_mutations(store_export='dictionary', d_export=True,
@@ -363,14 +380,18 @@ def stacked_mutations(store_export='dictionary', d_export=True,
             GCPans, ms_times, ms_vals, ms_fams, ms_muts, mut_list, E_list = \
             import_file(simdata)
         # extract the affinities and ancestor affinities at the analysis points
-        tList = freePan.keys()
+        tList = list(freePan["timepoint"].values)
         # limit cell number to be drawn in order not to clatter the plot
         # possibility of subsampling here
         tp = analysis_time
-        cellnum = len(freePan[tList[tp]].dropna())
-        cells = freePan[tList[tp]].dropna().sample(cellnum, replace=False)
-        final_dist = cells['affinity'].dropna().tolist()
-        ancestor_dist = cells['affinity0'].dropna().tolist()
+
+        freePan_no_na = freePan.sel(timepoint = tList[tp]).dropna("dim_0")
+        cellnum = len(freePan_no_na)
+        cell_id = np.random.choice(len(freePan_no_na), cellnum)
+        cells = freePan_no_na[cell_id, :]
+
+        final_dist = list(cells.loc[dict(dim_1="affinity")].dropna("dim_0").values)
+        ancestor_dist = list(cells.loc[dict(dim_1="affinity0")].dropna("dim_0").values)
 
         # extract counts of unchanged, improved and impaired cells
         unchanged_list = np.array(final_dist)[np.where(np.array(
@@ -454,10 +475,10 @@ def AM_effect_nkey(nkeys=[1, 5, 10, 15], repeats=100, d_export=True):
     def GC_affinity(GCPan):
         """ Given a GC panel, gets the mean E_norm for each timepoint."""
         energies = []
-        tList = GCPan.keys()
+        tList = list(GCPan["timepoint"].values)
 
         for tp in range(len(tList)):
-            energy = GCPan[tList[tp]]['affinity'].dropna().mean()
+            energy = GCPan.sel(timepoint = tList[tp]).loc[dict(dim_1="affinity")].dropna("dim_0").values.mean()
             energies.append(energy)
 
         return tList, energies

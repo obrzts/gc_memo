@@ -7,6 +7,11 @@ more information. All plots produced are saved to '/figures'.
 from __future__ import division
 from __future__ import print_function
 
+from builtins import next
+from builtins import str
+from builtins import zip
+from builtins import map
+from builtins import range
 from collections import Counter
 import itertools
 import math
@@ -15,10 +20,12 @@ from matplotlib import rc
 from matplotlib.ticker import NullFormatter
 import numpy as np
 import pandas as pd
+import xarray as xr
 import pylab
 import seaborn
 import sys
 import time
+from importlib import *
 
 import gc_memo
 from gc_memo import Ag_density, LF_presence, main
@@ -35,8 +42,8 @@ seaborn.set_style('ticks')
 seaborn.set_context('talk')
 
 plt.rc('text', usetex=True)
-rc('font', **{'family': 'sans-serif', 'sans-serif': ['Helvetica'],
-              'style': 'normal'})
+# rc('font', **{'family': 'sans-serif', 'sans-serif': ['Helvetica'],
+#               'style': 'normal'})
 rc("text.latex", preamble=["\\usepackage{helvet}\\usepackage{sfmath}"])
 pylab.ion()
 
@@ -88,20 +95,20 @@ def import_file(simdata):
         Agcurve = pd.read_hdf(simdata, 'Agcurve')[0].tolist()
 
         ms_times = pd.read_hdf(simdata, 'ms_times')
-        ms_times = map(list, ms_times.values)
+        ms_times = list(map(list, ms_times.values))
         ms_vals = pd.read_hdf(simdata, 'ms_vals')
-        ms_vals = map(list, ms_vals.values)
+        ms_vals = list(map(list, ms_vals.values))
         ms_fams = pd.read_hdf(simdata, 'ms_fams')
-        ms_fams = map(list, ms_fams.values)
+        ms_fams = list(map(list, ms_fams.values))
         ms_muts = pd.read_hdf(simdata, 'ms_muts')
-        ms_muts = map(list, ms_muts.values)
+        ms_muts = list(map(list, ms_muts.values))
 
         mut_listX = pd.read_hdf(simdata, 'mut_list')
         m0 = list(mut_listX.values[:, 0])
         m1 = list(mut_listX.values[:, 1])
         m2 = list(mut_listX.values[:, 2])
         m3 = list(mut_listX.values[:, 3])
-        mut_list = zip(m0, m1, m2, m3)
+        mut_list = list(zip(m0, m1, m2, m3))
 
         evaltimes = pd.read_hdf(simdata, 'times')[0].tolist()
         complete_Mem = {}  # dict for memory info data frames
@@ -113,10 +120,11 @@ def import_file(simdata):
                 complete_GCs[gc][tp] = pd.read_hdf(simdata,
                                                    'GC{0}_{1}'.format(gc, tp))
 
-        freePan = pd.Panel(complete_Mem)
+        freePan = xr.Dataset(complete_Mem).to_array()
+
         GCPans = []
         for i in range(nGCs):
-            GCPan = pd.Panel(complete_GCs[i])
+            GCPan = xr.Dataset(complete_GCs[i]).to_array()
             GCPans.append(GCPan)
 
     elif type(simdata) is dict:  # if a dictionary was given, extract data
@@ -132,19 +140,19 @@ def import_file(simdata):
         Agcurve = simdata['Agcurve'][0].tolist()
 
         ms_times = simdata['ms_times']
-        ms_times = map(list, ms_times.values)
+        ms_times = list(map(list, ms_times.values))
         ms_vals = simdata['ms_vals']
-        ms_vals = map(list, ms_vals.values)
+        ms_vals = list(map(list, ms_vals.values))
         ms_fams = simdata['ms_fams']
-        ms_fams = map(list, ms_fams.values)
+        ms_fams = list(map(list, ms_fams.values))
         ms_muts = simdata['ms_muts']
-        ms_muts = map(list, ms_muts.values)
+        ms_muts = list(map(list, ms_muts.values))
 
         m0 = simdata['mut_list'][0].tolist()
         m1 = simdata['mut_list'][1].tolist()
         m2 = simdata['mut_list'][2].tolist()
         m3 = simdata['mut_list'][3].tolist()
-        mut_list = zip(m0, m1, m2, m3)
+        mut_list = list(zip(m0, m1, m2, m3))
 
         evaltimes = simdata['times'][0].tolist()
         complete_Mem = {}  # dict for memory info data frames
@@ -155,10 +163,13 @@ def import_file(simdata):
             for gc in range(nGCs):
                 complete_GCs[gc][tp] = simdata['GC{0}_{1}'.format(gc, tp)]
 
-        freePan = pd.Panel(complete_Mem)
+        freePan = xr.Dataset(complete_Mem).to_array()
+        freePan = freePan.rename({"variable" : "timepoint"})
+
         GCPans = []
         for i in range(nGCs):
-            GCPan = pd.Panel(complete_GCs[i])
+            GCPan = xr.Dataset(complete_GCs[i]).to_array()
+            GCPan = GCPan.rename({"variable" : "timepoint"})
             GCPans.append(GCPan)
     else:  # throw error
         sys.exit("""The object given to the import function is neither a
@@ -194,9 +205,9 @@ def GC_dynamics_plot(GCPan, ms_times, ms_fams, ms_vals, ms_muts, runID, GC_ID):
     # get Counters for all timepoints and a list of families having appeared
     CList = []
     mC = []
-    tList = GCPan.keys()
+    tList = list(GCPan["timepoint"].values)
     for tp in range(len(tList)):
-        C = Counter(GCPan[tList[tp]]['family'].dropna())
+        C = Counter(GCPan[tList[tp]].loc[dict(dim_1="family")].dropna("dim_0").values)
         CList.append(C)
         mC = mC + list(C)
     all_fams = list(set(mC))
@@ -275,12 +286,12 @@ def GC_phases(GCPan, mut_list):
     mutations per day and clone, beneficial mutations per day and clone."""
     clonenums = []
     cellnums = []
-    tList = GCPan.keys()
+    tList = list(GCPan["timepoint"].values)
 
     for tp in range(len(tList)):
-        cellnum = len(GCPan[tList[tp]]['family'].dropna())
-        C = Counter(GCPan[tList[tp]]['family'].dropna())
-        clonenums.append(len(C.keys()))
+        cellnum = len(GCPan[tList[tp]].loc[dict(dim_1="family")].dropna("dim_0").values)
+        C = Counter(GCPan[tList[tp]].loc[dict(dim_1="family")].dropna("dim_0").values)
+        clonenums.append(len(list(C.keys())))
         cellnums.append(cellnum)
 
     """ Count mutations and beneficial mutations per clone and timestep.
@@ -365,8 +376,8 @@ def oneGC(repeats=100):
     ax1.legend(loc=0)
     seaborn.despine()
 
-    ax2.plot(range(tend+1), mmbin, '-o', label='all', color='crimson')
-    ax2.plot(range(tend+1), np.array(bmbin)*10, '-o',
+    ax2.plot(list(range(tend+1)), mmbin, '-o', label='all', color='crimson')
+    ax2.plot(list(range(tend+1)), np.array(bmbin)*10, '-o',
              label='beneficial ($\cdot 10$)', color='cornflowerblue')
     ax2.legend(loc=0)
     ax2.set_ylabel('mutations/(clone$\cdot$day)')
@@ -690,13 +701,13 @@ def Ag_LF_plot():
     lfden = LF_presence()
     fig, ax = plt.subplots(2, 1, sharex=True, figsize=(10, 10))
 
-    ax[0].plot(np.array(range(cf.endtime+1))/float(12), np.array(agden),
+    ax[0].plot(np.array(list(range(cf.endtime+1)))/float(12), np.array(agden),
                color='black')
     ax[0].set_ylabel('Ag presence in the \n system (\% of max)')
     ax[1].set_xticks([0, 7, 25, 35, 50, 63, 75, 100, 126])
     ax[1].set_xticklabels(['0', 'I', '25', 'II', '50', 'III', '75', '100',
                            'C'])
-    ax[1].plot(np.array(range(cf.endtime+1))/float(12), np.array(lfden),
+    ax[1].plot(np.array(list(range(cf.endtime+1)))/float(12), np.array(lfden),
                color='black')
     ax[1].set_ylabel('Number \n of $T_{FH}$ cells')
     ax[1].set_xlabel('time (days)')
@@ -930,7 +941,7 @@ def sensit_panels():
     axes[0].set_xlabel(r'n$_{key}$')
     axes[0].set_xlim([0, 1.58])
     axes[0].set_xticks(nkey_x)
-    axes[0].set_xticklabels(map(str, nkey_real))
+    axes[0].set_xticklabels(list(map(str, nkey_real)))
 
     axes[1].errorbar(nLF_x, nLF_E, yerr=nLF_err, fmt='-o')
     axes[1].set_xlabel('GC peak size (B cells)')
@@ -943,7 +954,7 @@ def sensit_panels():
     axes[2].set_xlabel('GC decay constant (days)')
     axes[2].set_xlim([0, 3.15])
     axes[2].set_xticks(tdec_x)
-    axes[2].set_xticklabels(map(str, tdec_real))
+    axes[2].set_xticklabels(list(map(str, tdec_real)))
 
     axes[3].errorbar(dose_x, dose_E, yerr=dose_err, fmt='-o')
     axes[3].set_xlabel('immunization dose (\% of simulation maximum)')

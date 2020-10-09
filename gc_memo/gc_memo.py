@@ -5,14 +5,17 @@ as a file, this ends up in the folder '/raw_data'.
 """
 from __future__ import division
 from __future__ import print_function
+from builtins import range
+from builtins import object
 import itertools
 import math
-import random
 import time as tm
 import numpy as np
 import pandas as pd
 import scipy.stats
 from collections import Counter
+from importlib import *
+
 import cf
 reload(cf)
 
@@ -39,6 +42,14 @@ def new_lists():
     free_naives, free_memory = [], []
     GC_waiting = [[] for gc in range(cf.nGCs)]
     return free_naives, free_memory, GC_waiting
+
+
+def store_append(store, key, value):
+    """Universal method to add items to store"""
+    if type(store) == dict:
+        store[key] = value
+    elif type(store) == pd.io.pytables.HDFStore:
+        store.append(key, value, format='table')
 
 
 class Bcell(object):
@@ -145,12 +156,10 @@ def objective_distribution():
         # for nkey = 1, a lot of small bins may not be occupied, thus choose
         # larger bins
         bin_size_goal = 0.1
-        bin_number = max(np.round((cf.upperlim-cf.thr)/bin_size_goal), 1)
-        bin_edges = np.linspace(cf.thr, cf.upperlim, bin_number+1)
     else:
         bin_size_goal = 0.025
-        bin_number = max(np.round((cf.upperlim-cf.thr)/bin_size_goal), 1)
-        bin_edges = np.linspace(cf.thr, cf.upperlim, bin_number+1)
+    bin_number = max(int(np.round((cf.upperlim-cf.thr)/bin_size_goal)), 1)
+    bin_edges = np.linspace(cf.thr, cf.upperlim, bin_number+1)
     # for the midpoint of each bin, get Gaussian distribution value for
     # mean=0.5 and std=0.1
     bin_midpoints = bin_edges[:-1] + (bin_edges[1]-bin_edges[0])/2
@@ -354,7 +363,7 @@ def make_naive(RNs, seq_list, AgEpitope, tnow):
     """ Prepares a naive B cell with a sequence that binds to the epitope
     with above threshold affinity and returns a B cell object. """
     # pick a random sequence from the pregenerated pool
-    ab = random.choice(seq_list)
+    ab = seq_list[np.random.choice(len(seq_list))]
     Emax = E_best(ab, AgEpitope)
     if tnow == 0:   # in initialisation, distribute ages evenly over
                     # lifespan
@@ -373,7 +382,7 @@ def make_memory(RNs, seq_list, AgEpitope, tnow):
     """ Prepares an unspecific memory B cell with a sequence that binds to the
     epitope with above threshold affinity and returns a
     B cell object with a random number of mutations from its past (0-40). """
-    ab = random.choice(seq_list)
+    ab = seq_list[np.random.choice(len(seq_list))]
     Emax = E_best(ab, AgEpitope)
     mutcount = np.round(RNs.getR() * 40)
     newcell = Bcell(sequence=ab, sequence0=ab, affinity=Emax, affinity0=Emax,
@@ -428,7 +437,7 @@ def mutate_seq(seq, block0, RNs):
     # if the cell has not died yet, analyse mutations in the CDR region
     if CDR_changes > 0:
         # get non-repetitive positions where mutation will be attempted
-        changepos = random.sample(range(cf.nkey), CDR_changes)
+        changepos = np.random.choice(cf.nkey, CDR_changes, replace=False)
         for pos in changepos:
             # get transition probabilities for the current amino acid
             cumprob = np.cumsum(cf.tp20[sequence[pos] - 1])
@@ -608,8 +617,8 @@ def try_activation(Agden, free_naives, free_memory, tnow, RNs):
     fail_naive = []
     fail_memory = []
     # randomize free cell lists
-    random.shuffle(free_naives)
-    random.shuffle(free_memory)
+    np.random.shuffle(free_naives)
+    np.random.shuffle(free_memory)
     # get number of cells to activate from naive list
     act_n = np.random.binomial(len(free_naives), cf.p_base * Agden)
     # get number of memory cells to be activated to enter GC
@@ -689,8 +698,8 @@ def select_best_waiters(LFnum, cellSK, GCpos, tnow, AgEpitope, mut_list, RNs):
     div = np.random.binomial(len(selected_daughters), cf.recycle)
     diff = len(selected_daughters) - div
     # mix daughters (twice, don't trust this function so much)
-    random.shuffle(selected_daughters)
-    random.shuffle(selected_daughters)
+    np.random.shuffle(selected_daughters)
+    np.random.shuffle(selected_daughters)
     # make events if count > 0
     new_events = []
     if div > 0:
@@ -769,11 +778,11 @@ def main(runID=00, store_export='datafile', evalperday=1):
 
     # for the required number of naive cells in the system, make Abs and append
     # to free_naive list, same for unspecific memory cells
-    for n in xrange(cf.naive_pool):
+    for n in range(cf.naive_pool):
         newcell = make_naive(RNs, seq_list, AgEpitope, tnow)
         free_naives.append(newcell)
 
-    for n in xrange(cf.memory_pool):
+    for n in range(cf.memory_pool):
         newcell = make_memory(RNs, seq_list, AgEpitope, tnow)
         free_memory.append(newcell)
 
@@ -812,7 +821,7 @@ def main(runID=00, store_export='datafile', evalperday=1):
 
     # timepoints at which to store the state of the simulation
     evalfac = int(12/evalperday)
-    evaltimes = np.array(range(int(cf.endtime / evalfac))) * evalfac
+    evaltimes = np.array(list(range(int(cf.endtime / evalfac)))) * evalfac
 
     # start looping over all events at every timestep
     while tnow <= cf.endtime:
@@ -898,7 +907,8 @@ def main(runID=00, store_export='datafile', evalperday=1):
                                                        'affinity0',
                                                        'birthtime',
                                                        'mutations', 'origin'])
-                store['free_{}'.format(tnow)] = memDF
+
+                store_append(store, 'free_{}'.format(tnow), memDF)
 
                 for i in range(cf.nGCs):
                     GCinfo = []
@@ -920,7 +930,9 @@ def main(runID=00, store_export='datafile', evalperday=1):
                                                          'affinity0',
                                                          'birthtime',
                                                          'mutations'])
-                    store['GC{0}_{1}'.format(i, tnow)] = GCDF
+
+                    store_append(store, 'GC{0}_{1}'.format(i, tnow), GCDF)
+
             elif store_export == 'minimal':
                 l_fm.append(len(free_memory))
                 afflist = [cell.affinity for cell in free_memory]
@@ -932,7 +944,7 @@ def main(runID=00, store_export='datafile', evalperday=1):
                 s_mut.append(np.nanstd(mutatlist))
 
                 CC = Counter(familist)
-                l_ents.append(scipy.stats.entropy(CC.values(), base=2))
+                l_ents.append(scipy.stats.entropy(list(CC.values()), base=2))
 
         # increment time
         tnow += 1
@@ -942,21 +954,21 @@ def main(runID=00, store_export='datafile', evalperday=1):
 
     if (store_export == 'datafile' or store_export == 'dictionary'):
         # put all remaining information into storage
-        store['l_times'] = pd.DataFrame(np.arange(cf.endtime+1)/float(12))
-        store['l_fn'] = pd.DataFrame(l_fn)
-        store['l_fm'] = pd.DataFrame(l_fm)
+        store_append(store, 'l_times', pd.DataFrame(np.arange(cf.endtime+1)/float(12)))
+        store_append(store, 'l_fn', pd.DataFrame(l_fn))
+        store_append(store, 'l_fm', pd.DataFrame(l_fm))
         for i in range(len(l_GCs)):
-            store['l_GCs_{}'.format(i)] = pd.DataFrame(l_GCs[i])
-        store['LFcurve'] = pd.DataFrame(LFcurve)
-        store['Agcurve'] = pd.DataFrame(Agcurve)
-        store['mut_list'] = pd.DataFrame(mut_list)
-        store['ms_fams'] = pd.DataFrame(ms_fams)
-        store['ms_vals'] = pd.DataFrame(ms_vals)
-        store['ms_times'] = pd.DataFrame(ms_times)
-        store['ms_muts'] = pd.DataFrame(ms_muts)
-        store['times'] = pd.DataFrame(evaltimes)
-        store['nGCs'] = pd.DataFrame([cf.nGCs])
-        store['E_list'] = pd.DataFrame(E_list)
+            store_append(store, 'l_GCs_{}'.format(i), pd.DataFrame(l_GCs[i]))
+        store_append(store, 'LFcurve', pd.DataFrame(LFcurve))
+        store_append(store, 'Agcurve', pd.DataFrame(Agcurve))
+        store_append(store, 'mut_list', pd.DataFrame(mut_list))
+        store_append(store, 'ms_fams', pd.DataFrame(ms_fams))
+        store_append(store, 'ms_vals', pd.DataFrame(ms_vals))
+        store_append(store, 'ms_times', pd.DataFrame(ms_times))
+        store_append(store, 'ms_muts', pd.DataFrame(ms_muts))
+        store_append(store, 'times', pd.DataFrame(evaltimes))
+        store_append(store, 'nGCs', pd.DataFrame([cf.nGCs]))
+        store_append(store, 'E_list', pd.DataFrame(E_list))
 
         if store_export == 'datafile':
             store.close()

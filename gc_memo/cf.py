@@ -5,6 +5,8 @@ mutation and binding.
 
 Basic timestep is two hours --> give all rates and durations in units of 2 hrs!
 """
+from __future__ import division
+from past.utils import old_div
 import numpy as np
 import math
 
@@ -73,7 +75,7 @@ p_block_FWR = 0.55  # probability that a non-lethal FWR mutation blocks AM
 Elow = -11.5  # energy of lower detection limit in kT (K = 10^-5 mol/l)
 Ehigh = -20.7  # energy of higher detection limit in kT (K = 10^-9 mol/l)
 
-m = (Ehigh-Elow)/(1-thr)  # gradient of energy trafo
+m = old_div((Ehigh-Elow),(1-thr))  # gradient of energy trafo
 y0 = -m*thr+Elow
 
 # K_D [mol/l]   <-->    Delta G [kT]
