@@ -36,12 +36,12 @@ Introduce simple B cell class as information container.
 
 
 def new_lists():
-    """ Returns lists for keeping track of free (outside of GCs) memory and
+    """ Returns lists for keeping track of free (outside of GCs) memory, plasma and
     naive B cells as well as a list of lists of B cells waiting for surivival
     signals in each GC. """
-    free_naives, free_memory = [], []
+    free_naives, free_memory, free_plasma = [], [], []
     GC_waiting = [[] for gc in range(cf.nGCs)]
-    return free_naives, free_memory, GC_waiting
+    return free_naives, free_memory, free_plasma, GC_waiting
 
 
 def store_append(store, key, value):
@@ -607,43 +607,78 @@ def long_waiters_die(celllist, tnow):
     return survivors
 
 
-def try_activation(Agden, free_naives, free_memory, tnow, RNs):
+def calc_activation_prob(cell_list, Agden, free_plasma):
+    """ Calculates activation probability for every cell based on its affinity
+    and the free plasma cells present"""
+    # generate lists of plasma cells that have higher affinity than a cell in the list
+    competitor_aff = [[x.affinity for x in free_plasma if x.affinity > y.affinity] for y in cell_list]
+    avg_competitor_aff = [np.mean(x) for x in competitor_aff]
+    avg_competitor_kd = np.array([E2KD(x) for x in avg_competitor_aff])
+    n_competitors = np.array([len(x) for x in competitor_aff])
+    return cf.p_base * Agden * cf.ab_conc * n_competitors * avg_competitor_kd
+
+
+def try_activation(Agden, free_naives, free_memory, free_plasma, tnow):
     """ Given the current antigen density and the lists of free cells,
     the function tries to activate a corresponding number of cells and
     applies an activation probability corresponding to its affinity to
     every one of them. The lists of remaining free cells as well as an event
     of germination to be added to the event_list are returned. """
     activated = []
-    fail_naive = []
-    fail_memory = []
-    # randomize free cell lists
-    np.random.shuffle(free_naives)
-    np.random.shuffle(free_memory)
-    # get number of cells to activate from naive list
-    act_n = np.random.binomial(len(free_naives), cf.p_base * Agden)
-    # get number of memory cells to be activated to enter GC
-    act_m = np.random.binomial(len(free_memory), cf.p_base * Agden)
-    actsum = act_n + act_m
-    # activation of act_n naive cells
-    for i in range(int(act_n)):
-        cell = free_naives.pop()
-        activated.append(cell)
 
-    # activation of act_m memory cells for GC
-    for i in range(int(act_m)):
-        cell = free_memory.pop()
-        activated.append(cell)
+    if cf.act_mode == "uniform":
+        # randomize free cell lists
+        np.random.shuffle(free_naives)
+        np.random.shuffle(free_memory)
+        # get number of cells to activate from naive list
+        act_n = np.random.binomial(len(free_naives), cf.p_base * Agden)
+        # get number of memory cells to be activated to enter GC
+        act_m = np.random.binomial(len(free_memory), cf.p_base * Agden)
+        actsum = act_n + act_m
+        # activation of act_n naive cells
+        for i in range(int(act_n)):
+            cell = free_naives.pop()
+            activated.append(cell)
 
-    # merge lists to new free pool and create event to be returned
-    new_free_naives = free_naives + fail_naive
-    new_free_memory = free_memory + fail_memory
-    if len(activated) > 0:
+        # activation of act_m memory cells for GC
+        for i in range(int(act_m)):
+            cell = free_memory.pop()
+            activated.append(cell)
+
+    elif cf.act_mode == "affinity":
+        # get activation probabilities
+        act_prob_naive = calc_activation_prob(free_naive, Agden, free_plasma)
+        act_prob_memory = calc_activation_prob(free_memory, Agden, free_plasma)
+
+        # randomly pick cells to be activated
+        act_naive = np.random.binomial(1, act_prob_naive)
+        act_memory = np.random.binomial(1, act_prob_memory)
+
+        # get number of memory cells to be activated to enter GC
+        actsum = np.sum(act_naive) + np.sum(act_memory)
+
+        # activation of naive cells
+        act_naive_ind = [ind for ind, x in enumerate(act_naive) if x == 1]
+        for i in act_naive_ind:
+            cell = free_naives.pop(i)
+            activated.append(cell)
+
+        # activation of memory cells
+        act_memory_ind = [ind for ind, x in enumerate(act_memory) if x == 1]
+        for i in act_memory_ind:
+            cell = free_memory.pop(i)
+            activated.append(cell)
+    else:
+        raise ValueError("Wrong activation mode (must be 'uniform' or 'affinity')")
+
+    # create event to be returned
+    if actsum > 0:
         migtime = max(1, cf.tmigration)
         event = (tnow + migtime, 'Enter', None, activated)
     else:
         event = None
 
-    return new_free_naives, new_free_memory, event, actsum
+    return free_naives, free_memory, event, actsum
 
 
 def cells_enter_GCs(GC_waiting, celllist, tnow, RIs):
@@ -765,7 +800,7 @@ def main(runID=00, store_export='datafile', evalperday=1):
     tstart = tm.time()
 
     # get lists for keeping count of cells.
-    free_naives, free_memory, GC_waiting = new_lists()
+    free_naives, free_memory, free_plasma, GC_waiting = new_lists()
 
     # get random number objects for uniform 0-1, ints for GCs
     RNs = Rands()
@@ -879,7 +914,7 @@ def main(runID=00, store_export='datafile', evalperday=1):
         # activate free naive and memory cells if Ag is present in the system
         if Agcurve[tnow] > 0:
             free_naives, free_memory, event, actsum = try_activation(
-                Agcurve[tnow], free_naives, free_memory, tnow, RNs)
+                Agcurve[tnow], free_naives, free_memory, free_plasma, tnow)
             if event is not None:
                 event_list.append(event)
 

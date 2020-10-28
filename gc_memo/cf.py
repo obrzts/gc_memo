@@ -13,7 +13,7 @@ import math
 """
 timeframe and infection schedule
 """
-endtime = 30*12  # give first factor in days, multiply by timsteps per day
+endtime = 30*12  # give first factor in days, multiply by timesteps per day
 tinf = [0*12]  # as above for every infection timepoint
 dose = [1]  # fraction of maximum dose per infection timepoint
 
@@ -97,6 +97,13 @@ def E2KD(Ebind):
     KD = np.exp(dG)
     return KD
 
+
+"""
+Kinetic model
+"""
+
+act_mode = "affinity" # how to activate cells: 'uniform' for random activation, 'affinity' for affinity-based
+ab_conc = 10^-10 # concentration of Ab secreted by 1 plasma cell
 
 """
 amino acid transition and generation probabilities
