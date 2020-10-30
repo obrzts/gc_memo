@@ -50,6 +50,7 @@ tdiv = 4  # time necessary for division
 tdiff = 4  # time necessary for differentiation and exit
 tlifeGC = 4  # maximum survival time in the waiting area
 tlifeN = 14*12  # lifetime of free naive cells
+tsecret = 1 # time necessary for PC to start producing antibodies
 
 recycle = 0.9  # fraction of cells that choose to divide and recycle
 PCexport = 0.5  # fraction of cells that become PCs and not memory upon exit
@@ -99,11 +100,21 @@ def E2KD(Ebind):
 
 
 """
-Kinetic model
+Kinetic model and antibody feedback
 """
 
 act_mode = "affinity" # how to activate cells: 'uniform' for random activation, 'affinity' for affinity-based
-ab_conc = 10^-10 # concentration of Ab secreted by 1 plasma cell
+
+ab_secretion_rate = 2.1 * (10 ** -17) * 2 # [mol] antibodies secreted by 1 plasma cell per timestep (2 h)
+blood_volume = 5 # [l]
+PC_lifespan = 30 * 12 # [timesteps] average short-lived PC lifespan
+ab_halflife = 20.0 / 2 # [timesteps] pharmacological lifespan of IgG
+
+def ab_conc_now(t_secr_start, tnow):
+    t = np.array(range(tnow - t_secr_start + 1))
+    ab_per_t = ab_secretion_rate * 0.5 ** (t / ab_halflife)
+    return ab_per_t.sum() / blood_volume
+
 
 """
 amino acid transition and generation probabilities

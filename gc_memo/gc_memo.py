@@ -80,7 +80,7 @@ class Bcell(object):
 
     def __init__(self, sequence, sequence0, affinity, affinity0, origin,
                  birthtime, mutations=0, family=None, GCentrytime=None,
-                 AIDstart=None, block=False):
+                 AIDstart=None, PCdifftime=None, block=False):
         self.ID = self.uID
         Bcell.uID += 1
 
@@ -101,7 +101,16 @@ class Bcell(object):
         self.birthtime = birthtime  # time the family was produced from the BM
         self.GCentrytime = GCentrytime  # time the cell entered the waitlist
         self.AIDstart = AIDstart  # time since ancestor entered GC site
+        self.PCdifftime = PCdifftime # time the cell differentiated into PC
         self.block = block
+
+        self.ab_conc = 0
+
+    def update_ab_conc(self, tnow):
+        # Calculates current concentration of Ab that cell was secreting since
+        # differentiation into PC
+        self.ab_conc = cf.ab_conc_now(t_secr_start = self.PCdifftime + cf.tsecret,
+                                   tnow = tnow)
 
 
 class Rands(object):
@@ -487,7 +496,9 @@ def divide(mother, AgEpitope, tnow, mut_list, RNs):
                           mutations=mother.mutations + mutcount1,
                           family=mother.family, birthtime=mother.birthtime,
                           GCentrytime=tnow,
-                          AIDstart=mother.AIDstart, block=block1)
+                          AIDstart=mother.AIDstart,
+                          PCdifftime=None,
+                          block=block1)
         dlist.append(daughter1)
         # mutation counting
         num_muts += mutcount1
@@ -507,7 +518,9 @@ def divide(mother, AgEpitope, tnow, mut_list, RNs):
                           mutations=mother.mutations + mutcount2,
                           family=mother.family, birthtime=mother.birthtime,
                           GCentrytime=tnow,
-                          AIDstart=mother.AIDstart, block=block2)
+                          AIDstart=mother.AIDstart,
+                          PCdifftime=None,
+                          block=block2)
         dlist.append(daughter2)
         # mutation counting
         num_muts += mutcount2
@@ -580,6 +593,32 @@ def LF_presence():
     return LFcurve
 
 
+def calc_ab_feedback_coeff(cell_list, free_plasma):
+    """ Calculate proportion of antigen bound by competing antibodies -
+    those with affinity higher than a given cell has"""
+
+    # get list of PCs that have higher affinity and have produced ab already
+    competitiors = [[x for x in free_plasma if x.affinity > y.affinity and x.ab_conc > 0]
+                    for y in cell_list]
+
+    # calculate total concentration of antibodies that have higher affinity than a cell
+    ab_conc = [[x.ab_conc for x in y] for y in competitiors]
+    ab_conc = [np.array(x) for x in ab_conc]
+    ab_conc_total = [x.sum() for x in ab_conc]
+
+    # calculate weighted average Ebind of competitor antibody
+    ab_aff = [[x.affinity for x in y] for y in competitiors]
+    ab_aff = [np.array(x) for x in ab_aff]
+    ab_weight = [x/x.sum() for x in ab_conc]
+
+    avg_ab_aff = [np.sum(ab_weight[i] * ab_aff[i]) for i in range(len(ab_aff))]
+
+    # convert to KD
+    avg_ab_kd = np.array([cf.E2KD(x) for x in avg_ab_aff])
+
+    return 1 - ab_conc_total / avg_ab_kd
+
+
 """
 3) Actual events of the main simulation loop: cell deaths, cell divisions, GC
 entry, cell activation etc.
@@ -607,17 +646,6 @@ def long_waiters_die(celllist, tnow):
     return survivors
 
 
-def calc_activation_prob(cell_list, Agden, free_plasma):
-    """ Calculates activation probability for every cell based on its affinity
-    and the free plasma cells present"""
-    # generate lists of plasma cells that have higher affinity than a cell in the list
-    competitor_aff = [[x.affinity for x in free_plasma if x.affinity > y.affinity] for y in cell_list]
-    avg_competitor_aff = [np.mean(x) for x in competitor_aff]
-    avg_competitor_kd = np.array([E2KD(x) for x in avg_competitor_aff])
-    n_competitors = np.array([len(x) for x in competitor_aff])
-    return cf.p_base * Agden * cf.ab_conc * n_competitors * avg_competitor_kd
-
-
 def try_activation(Agden, free_naives, free_memory, free_plasma, tnow):
     """ Given the current antigen density and the lists of free cells,
     the function tries to activate a corresponding number of cells and
@@ -626,50 +654,41 @@ def try_activation(Agden, free_naives, free_memory, free_plasma, tnow):
     of germination to be added to the event_list are returned. """
     activated = []
 
+    # get activation probability
     if cf.act_mode == "uniform":
-        # randomize free cell lists
-        np.random.shuffle(free_naives)
-        np.random.shuffle(free_memory)
-        # get number of cells to activate from naive list
-        act_n = np.random.binomial(len(free_naives), cf.p_base * Agden)
-        # get number of memory cells to be activated to enter GC
-        act_m = np.random.binomial(len(free_memory), cf.p_base * Agden)
-        actsum = act_n + act_m
-        # activation of act_n naive cells
-        for i in range(int(act_n)):
-            cell = free_naives.pop()
-            activated.append(cell)
-
-        # activation of act_m memory cells for GC
-        for i in range(int(act_m)):
-            cell = free_memory.pop()
-            activated.append(cell)
-
+        feedback_coeff_naive = 1
+        feedback_coeff_memory = 1
     elif cf.act_mode == "affinity":
-        # get activation probabilities
-        act_prob_naive = calc_activation_prob(free_naive, Agden, free_plasma)
-        act_prob_memory = calc_activation_prob(free_memory, Agden, free_plasma)
-
-        # randomly pick cells to be activated
-        act_naive = np.random.binomial(1, act_prob_naive)
-        act_memory = np.random.binomial(1, act_prob_memory)
-
-        # get number of memory cells to be activated to enter GC
-        actsum = np.sum(act_naive) + np.sum(act_memory)
-
-        # activation of naive cells
-        act_naive_ind = [ind for ind, x in enumerate(act_naive) if x == 1]
-        for i in act_naive_ind:
-            cell = free_naives.pop(i)
-            activated.append(cell)
-
-        # activation of memory cells
-        act_memory_ind = [ind for ind, x in enumerate(act_memory) if x == 1]
-        for i in act_memory_ind:
-            cell = free_memory.pop(i)
-            activated.append(cell)
+        feedback_coeff_naive = calc_ab_feedback_coeff(free_naives, free_plasma)
+        feedback_coeff_memory = calc_ab_feedback_coeff(free_memory, free_plasma)
     else:
         raise ValueError("Wrong activation mode (must be 'uniform' or 'affinity')")
+
+    act_prob_naive = cf.p_base * Agden * feedback_coeff_naive
+    #print(act_prob_naive)
+    act_prob_memory = cf.p_base * Agden * feedback_coeff_memory
+    #print(act_prob_memory)
+
+    # stochastically activate cells
+    act_naive = np.random.binomial(1, act_prob_naive)
+    act_memory = np.random.binomial(1, act_prob_memory)
+
+    # get number of memory cells to be activated to enter GC
+    actsum = np.sum(act_naive) + np.sum(act_memory)
+
+    # activation of naive cells
+    if np.sum(act_naive) > 0:
+        act_naive_ind = [ind for ind, x in enumerate(act_naive) if x == 1]
+        activated_naive = [j for i, j in enumerate(free_naives) if i in act_naive_ind]
+        free_naives = [j for i, j in enumerate(free_naives) if i not in act_naive_ind]
+        activated += activated_naive
+
+    # activation of memory cells
+    if np.sum(act_memory) > 0:
+        act_memory_ind = [ind for ind, x in enumerate(act_memory) if x == 1]
+        activated_memory = [j for i, j in enumerate(free_memory) if i in act_memory_ind]
+        free_memory = [j for i, j in enumerate(free_memory) if i not in act_memory_ind]
+        activated += activated_memory
 
     # create event to be returned
     if actsum > 0:
@@ -742,11 +761,17 @@ def select_best_waiters(LFnum, cellSK, GCpos, tnow, AgEpitope, mut_list, RNs):
                      selected_daughters[:div])
         new_events.append(event_div)
     if diff > 0:
-        # get number of cells that will become memory cells, ignore rest (PCs)
-        memdiff = np.random.binomial(diff, (1 - cf.PCexport))
-        event_diff = (tnow + cf.thelp + cf.tdiv + cf.tdiff, 'Differentiate',
-                      GCpos, selected_daughters[div:div + memdiff])
-        new_events.append(event_diff)
+        # get number of cells that will become memory cells
+        mem_diff = np.random.binomial(diff, (1 - cf.PCexport))
+        diff_daughters = selected_daughters[div:]
+        event_diff_memory = (tnow + cf.thelp + cf.tdiv + cf.tdiff, 'Differentiate', GCpos, diff_daughters[:mem_diff], "memory")
+        new_events.append(event_diff_memory)
+
+        new_plasma = diff_daughters[mem_diff:]
+        for i in new_plasma:
+            i.PCdifftime = tnow + cf.thelp + cf.tdiv + cf.tdiff
+        event_diff_plasma = (tnow + cf.thelp + cf.tdiv + cf.tdiff, 'Differentiate', GCpos, new_plasma, "plasma")
+        new_events.append(event_diff_plasma)
 
     return rest, new_events, mut_list
 
@@ -812,7 +837,7 @@ def main(runID=00, store_export='datafile', evalperday=1):
     seq_list, E_list, AgEpitope = make_shaped_repertoire(RNs)
 
     # for the required number of naive cells in the system, make Abs and append
-    # to free_naive list, same for unspecific memory cells
+    # to free_naives list, same for unspecific memory cells
     for n in range(cf.naive_pool):
         newcell = make_naive(RNs, seq_list, AgEpitope, tnow)
         free_naives.append(newcell)
@@ -834,7 +859,7 @@ def main(runID=00, store_export='datafile', evalperday=1):
     l_fm = []  # free memory
     mut_list = []  # for collecting all mutations and their effects
 
-    if (store_export == 'datafile' or store_export == 'dictionary'):
+    if store_export == 'datafile' or store_export == 'dictionary':
         l_fn = []  # free naives
         l_GCs = [[] for i in range(cf.nGCs)]  # cells in each GC
         ms_times = [[] for gc in range(cf.nGCs)]  # times of memory prod./GC
@@ -860,7 +885,7 @@ def main(runID=00, store_export='datafile', evalperday=1):
 
     # start looping over all events at every timestep
     while tnow <= cf.endtime:
-        if (store_export == 'datafile' or store_export == 'dictionary'):
+        if store_export == 'datafile' or store_export == 'dictionary':
             l_fm.append(len(free_memory))
             l_fn.append(len(free_naives))
             for i in range(len(l_GCs)):
@@ -875,6 +900,9 @@ def main(runID=00, store_export='datafile', evalperday=1):
         free_naives = old_cells_die(free_naives, tnow)
         # remove cells which have died from the waiting_room
         GC_waiting = long_waiters_die(GC_waiting, tnow)
+        # update the concentration of secreted antibodies
+        for i in free_plasma:
+            i.update_ab_conc(tnow)
 
         # refill the naive_pool if it has fallen below standard size
         # taking care that it is not refilled instantaneously but at a speed
@@ -895,14 +923,16 @@ def main(runID=00, store_export='datafile', evalperday=1):
             # execute events happening now
             for event in now_list:
                 if event[1] == 'Enter':
-                    GC_waiting = cells_enter_GCs(GC_waiting, event[3], tnow,
-                                                 RIs)
+                    GC_waiting = cells_enter_GCs(GC_waiting, event[3], tnow, RIs)
                 elif event[1] == 'Divide':
                     GC_waiting[event[2]], mut_list = cell_division(
                         GC_waiting[event[2]], event[3], AgEpitope, tnow,
                         mut_list, RNs)
                 elif event[1] == 'Differentiate':
-                    free_memory = free_memory + event[3]
+                    if event[4] == "memory":
+                        free_memory = free_memory + event[3]
+                    else:
+                        free_plasma = free_plasma + event[3]
                     if (store_export == 'datafile' or
                         store_export == 'dictionary'):
                         for cell in event[3]:
